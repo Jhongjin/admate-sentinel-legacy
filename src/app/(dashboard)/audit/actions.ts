@@ -4,6 +4,47 @@ import { createClient } from '@/utils/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { ParsedRow, AuditResult } from './AuditClientUI';
 
+type MetaApiJson = {
+    data?: unknown[];
+    currency?: string;
+    error?: unknown;
+};
+
+const META_API_BASE = 'https://graph.facebook.com/v19.0';
+
+function maskAccountId(accountId: string) {
+    const suffix = accountId.slice(-4);
+    return suffix ? `***${suffix}` : 'unknown';
+}
+
+async function fetchMetaJson(path: string, token: string, accountId: string, step: string): Promise<MetaApiJson | null> {
+    try {
+        const res = await fetch(`${META_API_BASE}/${path}`, {
+            cache: 'no-store',
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json() as MetaApiJson;
+
+        if (!res.ok || data.error) {
+            console.error('Meta API request failed', {
+                step,
+                account: maskAccountId(accountId),
+                status: res.status
+            });
+            return null;
+        }
+
+        return data;
+    } catch {
+        console.error('Meta API request failed', {
+            step,
+            account: maskAccountId(accountId),
+            status: 'network_error'
+        });
+        return null;
+    }
+}
+
 export async function crosscheckApiAction(rows: ParsedRow[]): Promise<AuditResult[]> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -27,7 +68,7 @@ export async function crosscheckApiAction(rows: ParsedRow[]): Promise<AuditResul
 
     const { data: tokenData } = await adminClient
         .from('platform_settings')
-        .select('*')
+        .select('access_token')
         .eq('platform', 'META')
         .single();
 
@@ -45,33 +86,30 @@ export async function crosscheckApiAction(rows: ParsedRow[]): Promise<AuditResul
     // If token exists, we fetch exactly what they need from Meta Graph API
     if (token) {
         for (const act of accountIds) {
-            try {
-                // Fetch AdSets along with their Campaign's budget
-                const adsetRes = await fetch(
-                    `https://graph.facebook.com/v19.0/act_${act}/adsets?fields=name,daily_budget,lifetime_budget,status,campaign_id,campaign{name,daily_budget,lifetime_budget,start_time,stop_time,objective,buying_type},optimization_goal,billing_event,promoted_object&limit=500&access_token=${token}`,
-                    { cache: 'no-store' }
-                );
-                const adsetData = await adsetRes.json();
+            const adsetData = await fetchMetaJson(
+                `act_${act}/adsets?fields=name,daily_budget,lifetime_budget,status,campaign_id,campaign{name,daily_budget,lifetime_budget,start_time,stop_time,objective,buying_type},optimization_goal,billing_event,promoted_object&limit=500`,
+                token,
+                act,
+                'adsets'
+            );
+            const adsData = await fetchMetaJson(
+                `act_${act}/ads?fields=name,adset_id,creative{url_tags,object_story_spec},status&limit=500`,
+                token,
+                act,
+                'ads'
+            );
+            const accData = await fetchMetaJson(
+                `act_${act}?fields=currency`,
+                token,
+                act,
+                'account'
+            );
 
-                // Fetch Ads for URL & UTM checking
-                const adsRes = await fetch(
-                    `https://graph.facebook.com/v19.0/act_${act}/ads?fields=name,adset_id,creative{url_tags,object_story_spec},status&limit=500&access_token=${token}`,
-                    { cache: 'no-store' }
-                );
-                const adsData = await adsRes.json();
-
-                // Fetch Account Currency
-                const accRes = await fetch(
-                    `https://graph.facebook.com/v19.0/act_${act}?fields=currency&access_token=${token}`,
-                    { cache: 'no-store' }
-                );
-                const accData = await accRes.json();
-
-                liveMetaCache[act] = { adsets: adsetData.data || [], ads: adsData.data || [], currency: accData.currency || 'KRW' };
-            } catch (error) {
-                console.error(`Meta API Error for Act ${act}:`, error);
-                liveMetaCache[act] = { adsets: [], ads: [] };
-            }
+            liveMetaCache[act] = {
+                adsets: Array.isArray(adsetData?.data) ? adsetData.data : [],
+                ads: Array.isArray(adsData?.data) ? adsData.data : [],
+                currency: accData?.currency || 'KRW'
+            };
         }
     }
 

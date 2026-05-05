@@ -3,6 +3,24 @@
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
 
+type PlatformSecretUpdate = {
+    platform: string;
+    app_id: string;
+    business_id: string | null;
+    updated_at: string;
+    app_secret?: string;
+    access_token?: string;
+    refresh_token?: string;
+};
+
+type PlatformSecrets = {
+    app_id?: string | null;
+    app_secret?: string | null;
+    access_token?: string | null;
+    business_id?: string | null;
+    refresh_token?: string | null;
+};
+
 // Reusable auth check
 async function requireAdmin() {
     const supabase = await createClient();
@@ -17,57 +35,87 @@ async function requireAdmin() {
 
 export async function savePlatformSettingsAction(formData: FormData): Promise<void> {
     const supabase = await requireAdmin();
-    const platform = formData.get('platform') as string;
-    const appId = formData.get('appId') as string;
-    const appSecret = formData.get('appSecret') as string;
-    const accessToken = formData.get('accessToken') as string;
-    const businessId = formData.get('businessId') as string;
-    const refreshToken = formData.get('refreshToken') as string;
+    const platform = String(formData.get('platform') || '');
+    const appId = String(formData.get('appId') || '');
+    const appSecret = String(formData.get('appSecret') || '');
+    const accessToken = String(formData.get('accessToken') || '');
+    const businessId = String(formData.get('businessId') || '');
+    const refreshToken = String(formData.get('refreshToken') || '');
 
-    const { error } = await supabase
+    const payload: PlatformSecretUpdate = {
+        platform,
+        app_id: appId,
+        business_id: businessId || null,
+        updated_at: new Date().toISOString()
+    };
+
+    // Blank secret fields mean "keep the existing stored value".
+    if (appSecret.trim()) payload.app_secret = appSecret.trim();
+    if (accessToken.trim()) payload.access_token = accessToken.trim();
+    if (refreshToken.trim()) payload.refresh_token = refreshToken.trim();
+
+    const { data: existingSetting } = await supabase
         .from('platform_settings')
-        .upsert({
-            platform,
-            app_id: appId,
-            app_secret: appSecret,
-            access_token: accessToken,
-            business_id: businessId || null,
-            refresh_token: refreshToken || null,
-            updated_at: new Date().toISOString()
-        });
+        .select('platform')
+        .eq('platform', platform)
+        .maybeSingle();
+
+    const { error } = existingSetting
+        ? await supabase.from('platform_settings').update(payload).eq('platform', platform)
+        : await supabase.from('platform_settings').insert(payload);
 
     if (error) {
-        console.error('Update Setting Error:', error);
+        console.error('Platform settings update failed', { platform, code: error.code });
         return;
     }
     revalidatePath('/settings/media');
 }
 
-export async function testMetaConnectionAction(token: string): Promise<{ valid: boolean; message: string }> {
-    if (!token) return { valid: false, message: '저장된 토큰이 없습니다.' };
+export async function testMetaConnectionAction(): Promise<{ valid: boolean; message: string }> {
+    const supabase = await requireAdmin();
+    const { data: metaSettings } = await supabase
+        .from('platform_settings')
+        .select('access_token')
+        .eq('platform', 'META')
+        .single();
+
+    const token = metaSettings?.access_token;
+    if (!token) return { valid: false, message: '저장된 Meta 인증 정보가 없습니다.' };
 
     // Server execution for security
     try {
-        const res = await fetch(`https://graph.facebook.com/v19.0/me?access_token=${token}`, { cache: 'no-store' });
+        const res = await fetch('https://graph.facebook.com/v19.0/me', {
+            cache: 'no-store',
+            headers: { Authorization: `Bearer ${token}` }
+        });
         const data = await res.json();
 
-        if (data.error) {
-            return { valid: false, message: data.error.message };
+        if (!res.ok || data.error) {
+            console.error('Meta connection test failed', { status: res.status });
+            return { valid: false, message: 'Meta 연결에 실패했습니다. 저장된 인증 정보를 확인해주세요.' };
         }
 
-        return { valid: true, message: `🚀 정상 연결 성공! (계정: ${data.name || data.id})` };
-    } catch (err: any) {
-        return { valid: false, message: '네트워크 또는 서버 오류: ' + err.message };
+        return { valid: true, message: '정상 연결 성공' };
+    } catch {
+        console.error('Meta connection test failed');
+        return { valid: false, message: 'Meta 연결 테스트 중 서버 오류가 발생했습니다.' };
     }
 }
 
-export async function testGoogleConnectionAction(
-    appId: string,
-    appSecret: string,
-    refreshToken: string,
-    developerToken: string,
-    businessId: string
-): Promise<{ valid: boolean; message: string }> {
+export async function testGoogleConnectionAction(): Promise<{ valid: boolean; message: string }> {
+    const supabase = await requireAdmin();
+    const { data: googleSettings } = (await supabase
+        .from('platform_settings')
+        .select('app_id, app_secret, refresh_token, access_token, business_id')
+        .eq('platform', 'GOOGLE_ADS')
+        .single()) as { data: PlatformSecrets | null };
+
+    const appId = googleSettings?.app_id;
+    const appSecret = googleSettings?.app_secret;
+    const refreshToken = googleSettings?.refresh_token;
+    const developerToken = googleSettings?.access_token;
+    const businessId = googleSettings?.business_id;
+
     if (!appId || !appSecret || !refreshToken || !developerToken) {
         return { valid: false, message: 'Google 연동에 필요한 필수 정보(Client ID, Secret, Refresh Token, Developer Token)가 부족합니다.' };
     }
@@ -90,52 +138,56 @@ export async function testGoogleConnectionAction(
         let tokenData;
         try {
             tokenData = JSON.parse(tokenText);
-        } catch (e) {
-            console.error('Token Error HTML:', tokenText);
-            return { valid: false, message: `Access Token 파싱 실패 (${tokenRes.status}) - 데이터가 JSON 형식이 아닙니다.` };
+        } catch {
+            console.error('Google OAuth token response parse failed', { status: tokenRes.status });
+            return { valid: false, message: 'Google 인증 응답을 처리하지 못했습니다.' };
         }
 
         if (!tokenRes.ok || !tokenData.access_token) {
-            return { valid: false, message: `Access Token 발급 실패: ${tokenData.error_description || tokenData.error}` };
+            console.error('Google OAuth token exchange failed', { status: tokenRes.status });
+            return { valid: false, message: 'Google Access Token 발급에 실패했습니다. 저장된 인증 정보를 확인해주세요.' };
         }
 
         const currentAccessToken = tokenData.access_token;
+        const adsHeaders: Record<string, string> = {
+            'Authorization': `Bearer ${currentAccessToken}`,
+            'developer-token': developerToken.trim(),
+        };
+
+        if (businessId) {
+            adsHeaders['login-customer-id'] = businessId.replace(/[^0-9]/g, '');
+        }
 
         // 2. Ping Google Ads API (List Accessible Customers)
         const adsRes = await fetch('https://googleads.googleapis.com/v18/customers:listAccessibleCustomers', {
             method: 'GET',
             cache: 'no-store',
-            headers: {
-                'Authorization': `Bearer ${currentAccessToken}`,
-                'developer-token': developerToken.trim(),
-            },
+            headers: adsHeaders,
         });
 
         const adsText = await adsRes.text();
         let adsData;
         try {
             adsData = JSON.parse(adsText);
-        } catch (e) {
-            console.error('Google Ads Error HTML:', adsText);
-            return { valid: false, message: `Google Ads API 응답 파싱 실패 (${adsRes.status}) - 잘못된 엔드포인트 또는 식별자 오류일 수 있습니다.` };
+        } catch {
+            console.error('Google Ads response parse failed', { status: adsRes.status });
+            return { valid: false, message: 'Google Ads API 응답을 처리하지 못했습니다.' };
         }
 
-        if (adsData.error) {
-            return { valid: false, message: `Google Ads API 오류: ${adsData.error.message}` };
+        if (!adsRes.ok || adsData.error) {
+            console.error('Google Ads connection test failed', { status: adsRes.status });
+            return { valid: false, message: 'Google Ads API 연결에 실패했습니다. 저장된 인증 정보를 확인해주세요.' };
         }
 
         // Extract customer Resource Names (e.g. customers/1234567890)
-        let customers = adsData.resourceNames || [];
+        const customers = adsData.resourceNames || [];
         if (customers.length === 0) {
-            return { valid: true, message: '🚀 인증은 성공했으나, 접근 가능한 Google Ads 고객(계정)이 없습니다.' };
+            return { valid: true, message: '인증은 성공했으나 접근 가능한 Google Ads 계정이 없습니다.' };
         }
 
-        // Just display up to 3 numbers
-        const niceNames = customers.map((c: string) => c.replace('customers/', '')).slice(0, 3).join(', ');
-        const extra = customers.length > 3 ? ` 외 ${customers.length - 3}개` : '';
-
-        return { valid: true, message: `🚀 정상 연결 성공! 접근 가능 계정: ${niceNames}${extra}` };
-    } catch (err: any) {
-        return { valid: false, message: '서버 에러: ' + err.message };
+        return { valid: true, message: `정상 연결 성공. 접근 가능 계정 수: ${customers.length}` };
+    } catch {
+        console.error('Google connection test failed');
+        return { valid: false, message: 'Google 연결 테스트 중 서버 오류가 발생했습니다.' };
     }
 }

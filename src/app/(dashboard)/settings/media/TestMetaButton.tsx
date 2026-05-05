@@ -4,24 +4,19 @@ import { useState } from 'react';
 import { testMetaConnectionAction } from './actions';
 import { RefreshCw } from 'lucide-react';
 
-export default function TestMetaButton({ token }: { token?: string }) {
+export default function TestMetaButton() {
     const [loading, setLoading] = useState(false);
 
     const handleTest = async () => {
-        if (!token) {
-            alert('먼저 토큰을 입력하고 [저장] 버튼을 눌러주세요.');
-            return;
-        }
-
         setLoading(true);
         try {
-            const result = await testMetaConnectionAction(token);
+            const result = await testMetaConnectionAction();
             if (result.valid) {
                 alert(result.message);
             } else {
                 alert(`❌ 연결 실패\n내용: ${result.message}`);
             }
-        } catch (e) {
+        } catch {
             alert('알 수 없는 오류가 발생했습니다.');
         } finally {
             setLoading(false);

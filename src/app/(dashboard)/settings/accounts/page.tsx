@@ -30,11 +30,14 @@ export default async function AccountMappingPage() {
                 let results: any[] = [];
 
                 while (nextUrl) {
-                    const response = await fetch(nextUrl, { cache: 'no-store' });
+                    const response = await fetch(nextUrl, {
+                        cache: 'no-store',
+                        headers: { Authorization: `Bearer ${metaToken}` }
+                    });
                     const metaData: any = await response.json();
 
                     if (metaData.error) {
-                        metaApiError = metaData.error.message;
+                        metaApiError = 'Meta API 계정 목록을 가져오지 못했습니다.';
                         break;
                     }
 
@@ -44,18 +47,24 @@ export default async function AccountMappingPage() {
                     }
 
                     if (fetchedCount > 10000) break;
-                    nextUrl = metaData.paging?.next || null;
+                    if (metaData.paging?.next) {
+                        const sanitizedNextUrl = new URL(metaData.paging.next);
+                        sanitizedNextUrl.searchParams.delete('access_token');
+                        nextUrl = sanitizedNextUrl.toString();
+                    } else {
+                        nextUrl = null;
+                    }
                 }
                 return results;
             };
 
             const endpointsToFetch = [
-                `https://graph.facebook.com/v19.0/me/adaccounts?fields=name,account_id&limit=500&access_token=${metaToken}`
+                'https://graph.facebook.com/v19.0/me/adaccounts?fields=name,account_id&limit=500'
             ];
 
             if (bmId) {
-                endpointsToFetch.push(`https://graph.facebook.com/v19.0/${bmId}/client_ad_accounts?fields=name,account_id&limit=500&access_token=${metaToken}`);
-                endpointsToFetch.push(`https://graph.facebook.com/v19.0/${bmId}/owned_ad_accounts?fields=name,account_id&limit=500&access_token=${metaToken}`);
+                endpointsToFetch.push(`https://graph.facebook.com/v19.0/${bmId}/client_ad_accounts?fields=name,account_id&limit=500`);
+                endpointsToFetch.push(`https://graph.facebook.com/v19.0/${bmId}/owned_ad_accounts?fields=name,account_id&limit=500`);
             }
 
             const allFetchedAccounts: any[] = [];
@@ -83,8 +92,8 @@ export default async function AccountMappingPage() {
                 });
             });
 
-        } catch (e: any) {
-            metaApiError = e.message;
+        } catch {
+            metaApiError = 'Meta API 계정 목록을 가져오지 못했습니다.';
         }
     } else {
         metaApiError = "Meta API 토큰이 설정되지 않았습니다. 매체 연동 관리 메뉴에서 먼저 설정해주세요.";

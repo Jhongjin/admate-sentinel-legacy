@@ -58,7 +58,13 @@ export default async function ActiveDashboardPage() {
     if (token && accountIds.length > 0) {
         try {
             const promises = accountIds.map(async (actId) => {
-                const res = await fetch(`https://graph.facebook.com/v19.0/${actId.startsWith('act_') ? actId : `act_${actId}`}/campaigns?fields=id,name,objective,effective_status,status&limit=10&access_token=${token}`);
+                const res = await fetch(
+                    `https://graph.facebook.com/v19.0/${actId.startsWith('act_') ? actId : `act_${actId}`}/campaigns?fields=id,name,objective,effective_status,status&limit=10`,
+                    {
+                        cache: 'no-store',
+                        headers: { Authorization: `Bearer ${token}` }
+                    }
+                );
                 if (res.ok) {
                     const json = await res.json();
                     return (json.data || []).map((c: any) => ({ ...c, account_id: actId }));
@@ -67,8 +73,8 @@ export default async function ActiveDashboardPage() {
             });
             const results = await Promise.all(promises);
             liveCampaigns = results.flat().sort((a, b) => (a.effective_status === 'ACTIVE' ? -1 : 1)); // Active first
-        } catch (error) {
-            console.error('Failed to fetch live campaigns', error);
+        } catch {
+            console.error('Failed to fetch live campaigns');
         }
     }
 

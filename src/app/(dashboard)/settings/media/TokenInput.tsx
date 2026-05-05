@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
-export default function TokenInput({ defaultValue }: { defaultValue: string }) {
+export default function TokenInput() {
     const [show, setShow] = useState(false);
 
     return (
@@ -11,7 +11,7 @@ export default function TokenInput({ defaultValue }: { defaultValue: string }) {
             <input
                 type={show ? "text" : "password"}
                 name="accessToken"
-                defaultValue={defaultValue}
+                autoComplete="off"
                 className="w-full text-sm rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-2.5 pr-10 outline-none focus:border-indigo-500 font-mono text-zinc-600 dark:text-zinc-400"
                 placeholder="EAABw..."
             />
