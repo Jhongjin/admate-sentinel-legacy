@@ -101,6 +101,23 @@ const SYNTHETIC_PROVIDER_RESULTS = Object.freeze({
     },
 });
 
+const SYNTHETIC_ROLE_MUTATION_CASES = Object.freeze({
+    'admin-member-to-team-manager': {
+        actorRoles: ['ADMIN', 'SUPER_ADMIN'],
+        targetFixture: 'member',
+        fromRole: 'MEMBER',
+        toRole: 'TEAM_MANAGER',
+        status: 'synthetic_role_update_allowed',
+    },
+    'super-admin-team-manager-to-admin': {
+        actorRoles: ['SUPER_ADMIN'],
+        targetFixture: 'team-manager',
+        fromRole: 'TEAM_MANAGER',
+        toRole: 'ADMIN',
+        status: 'synthetic_role_update_allowed',
+    },
+});
+
 export const fixtureRoles = Object.freeze({
     'no-session': null,
     member: 'MEMBER',
@@ -172,6 +189,16 @@ async function routeRequest({ request, response, url, user, fixtureName }) {
 
     if (url.pathname === '/fixture/provider-action') {
         routeSyntheticProviderAction({ request, response, url, user });
+        return;
+    }
+
+    if (url.pathname === '/fixture/role-mutation') {
+        routeSyntheticRoleMutation({ request, response, url, user });
+        return;
+    }
+
+    if (url.pathname === '/fixture/role-mutation-state') {
+        routeSyntheticRoleMutationState({ request, response, url });
         return;
     }
 
@@ -247,6 +274,80 @@ function routeSyntheticProviderAction({ request, response, url, user }) {
     });
 }
 
+function routeSyntheticRoleMutation({ request, response, url, user }) {
+    if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'method_not_allowed' });
+        return;
+    }
+
+    if (!user) {
+        writeJson(response, 401, { error: 'local_fixture_no_session' });
+        return;
+    }
+
+    if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+        writeJson(response, 403, { error: 'local_fixture_role_mutation_forbidden' });
+        return;
+    }
+
+    const caseName = url.searchParams.get('case') || '';
+    const mutationCase = SYNTHETIC_ROLE_MUTATION_CASES[caseName];
+    if (!mutationCase) {
+        writeJson(response, 400, { error: 'local_fixture_unknown_role_mutation_case' });
+        return;
+    }
+
+    if (!mutationCase.actorRoles.includes(user.role)) {
+        writeJson(response, 403, { error: 'local_fixture_role_mutation_case_forbidden' });
+        return;
+    }
+
+    const isolatedUsers = cloneFixtureUsers();
+    const targetUser = isolatedUsers[mutationCase.targetFixture];
+    if (!targetUser || targetUser.role !== mutationCase.fromRole) {
+        writeJson(response, 409, { error: 'local_fixture_role_mutation_baseline_mismatch' });
+        return;
+    }
+
+    targetUser.role = mutationCase.toRole;
+
+    writeJson(response, 200, {
+        fixture: 'sentinel-local-role-mutation',
+        ok: true,
+        status: mutationCase.status,
+        actor_role: user.role,
+        target_fixture: mutationCase.targetFixture,
+        before_role: mutationCase.fromRole,
+        after_role: targetUser.role,
+        persisted: false,
+        reset_between_cases: true,
+        external_auth_called: false,
+        external_provider_called: false,
+        sql_executed: false,
+    });
+}
+
+function routeSyntheticRoleMutationState({ request, response, url }) {
+    if (request.method !== 'GET') {
+        writeJson(response, 405, { error: 'method_not_allowed' });
+        return;
+    }
+
+    const targetFixture = url.searchParams.get('target') || '';
+    const targetUser = FIXTURE_USERS[targetFixture];
+    if (!targetUser) {
+        writeJson(response, 404, { error: 'local_fixture_unknown_role_target' });
+        return;
+    }
+
+    writeJson(response, 200, {
+        fixture: 'sentinel-local-role-mutation-state',
+        target_fixture: targetFixture,
+        role: targetUser.role,
+        persisted: false,
+    });
+}
+
 function routeRestRequest({ request, response, url, user }) {
     if (!['GET', 'HEAD'].includes(request.method ?? '')) {
         writeJson(response, 403, { error: 'local_fixture_mutation_disabled' });
@@ -290,6 +391,12 @@ function routeRestRequest({ request, response, url, user }) {
     }
 
     writeJson(response, 200, rows);
+}
+
+function cloneFixtureUsers() {
+    return Object.fromEntries(
+        Object.entries(FIXTURE_USERS).map(([fixtureName, user]) => [fixtureName, { ...user }])
+    );
 }
 
 function filterRows(url, rows, user) {

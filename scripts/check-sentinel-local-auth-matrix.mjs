@@ -42,11 +42,10 @@ try {
     await checkNoSessionDebug(appOrigin);
     await checkDebugRoleMatrix(appOrigin);
     await checkSyntheticProviderActionMatrix(fixtureOrigin);
+    await checkSyntheticRoleMutationMatrix(fixtureOrigin);
 
     scanCapturesForForbiddenMarkers(captures);
     recordPass('forbidden marker scan over responses and captured logs returned zero hits');
-
-    recordBlocked('role mutation actions', 'Fixture denies REST mutations; no local-only action harness exists yet.');
 
     printSummary();
 } catch (error) {
@@ -244,6 +243,52 @@ async function checkSyntheticProviderActionMatrix(fixtureOrigin) {
     recordPass('provider test actions use local synthetic fixture without external calls');
 }
 
+async function checkSyntheticRoleMutationMatrix(fixtureOrigin) {
+    for (const fixtureName of ['member', 'team-manager']) {
+        const response = await fetchWithCapture(
+            `${fixtureOrigin}/fixture/role-mutation?case=admin-member-to-team-manager`,
+            { method: 'POST', redirect: 'manual', headers: fixtureHeaders(fixtureName) },
+            `POST /fixture/role-mutation ${fixtureName}`
+        );
+        assert(response.status === 403, `synthetic role mutation ${fixtureName} expected 403, got ${response.status}`);
+        assertNoCredentialEcho(response.body, `synthetic role mutation ${fixtureName}`);
+    }
+
+    const noSession = await fetchWithCapture(
+        `${fixtureOrigin}/fixture/role-mutation?case=admin-member-to-team-manager`,
+        { method: 'POST', redirect: 'manual' },
+        'POST /fixture/role-mutation no-session'
+    );
+    assert(noSession.status === 401, `synthetic role mutation no-session expected 401, got ${noSession.status}`);
+
+    const adminCase = await fetchSyntheticRoleMutationCase(fixtureOrigin, 'admin', 'admin-member-to-team-manager');
+    assert(adminCase.after_role === 'TEAM_MANAGER', 'admin synthetic role mutation did not return expected target role');
+    assert(adminCase.persisted === false, 'admin synthetic role mutation reported persistence');
+    assert(adminCase.external_auth_called === false, 'admin synthetic role mutation reported external auth call');
+    assert(adminCase.external_provider_called === false, 'admin synthetic role mutation reported provider call');
+    assert(adminCase.sql_executed === false, 'admin synthetic role mutation reported SQL execution');
+    await assertRoleMutationBaseline(fixtureOrigin, 'member', 'MEMBER');
+
+    const adminDenied = await fetchWithCapture(
+        `${fixtureOrigin}/fixture/role-mutation?case=super-admin-team-manager-to-admin`,
+        { method: 'POST', redirect: 'manual', headers: fixtureHeaders('admin') },
+        'POST /fixture/role-mutation admin super-admin-only case'
+    );
+    assert(adminDenied.status === 403, `admin super-admin-only role mutation case expected 403, got ${adminDenied.status}`);
+    assertNoCredentialEcho(adminDenied.body, 'admin super-admin-only role mutation case');
+
+    const superAdminCase = await fetchSyntheticRoleMutationCase(fixtureOrigin, 'super-admin', 'super-admin-team-manager-to-admin');
+    assert(superAdminCase.after_role === 'ADMIN', 'super-admin synthetic role mutation did not return expected target role');
+    assert(superAdminCase.reset_between_cases === true, 'super-admin synthetic role mutation did not report case isolation');
+    assert(superAdminCase.persisted === false, 'super-admin synthetic role mutation reported persistence');
+    assert(superAdminCase.external_auth_called === false, 'super-admin synthetic role mutation reported external auth call');
+    assert(superAdminCase.external_provider_called === false, 'super-admin synthetic role mutation reported provider call');
+    assert(superAdminCase.sql_executed === false, 'super-admin synthetic role mutation reported SQL execution');
+    await assertRoleMutationBaseline(fixtureOrigin, 'team-manager', 'TEAM_MANAGER');
+
+    recordPass('role mutation actions use local synthetic fixture with isolated in-memory state');
+}
+
 async function fetchSyntheticProviderCase(fixtureOrigin, fixtureName, provider, caseName) {
     const response = await fetchWithCapture(
         `${fixtureOrigin}/fixture/provider-action?provider=${provider}&case=${caseName}`,
@@ -253,6 +298,30 @@ async function fetchSyntheticProviderCase(fixtureOrigin, fixtureName, provider, 
     assert(response.status === 200, `synthetic provider action ${fixtureName} ${caseName} expected 200, got ${response.status}`);
     assertNoCredentialEcho(response.body, `synthetic provider action ${fixtureName} ${caseName}`);
     return JSON.parse(response.body);
+}
+
+async function fetchSyntheticRoleMutationCase(fixtureOrigin, fixtureName, caseName) {
+    const response = await fetchWithCapture(
+        `${fixtureOrigin}/fixture/role-mutation?case=${caseName}`,
+        { method: 'POST', redirect: 'manual', headers: fixtureHeaders(fixtureName) },
+        `POST /fixture/role-mutation ${fixtureName} ${caseName}`
+    );
+    assert(response.status === 200, `synthetic role mutation ${fixtureName} ${caseName} expected 200, got ${response.status}`);
+    assertNoCredentialEcho(response.body, `synthetic role mutation ${fixtureName} ${caseName}`);
+    return JSON.parse(response.body);
+}
+
+async function assertRoleMutationBaseline(fixtureOrigin, targetFixture, expectedRole) {
+    const response = await fetchWithCapture(
+        `${fixtureOrigin}/fixture/role-mutation-state?target=${targetFixture}`,
+        { redirect: 'manual' },
+        `GET /fixture/role-mutation-state ${targetFixture}`
+    );
+    assert(response.status === 200, `synthetic role mutation baseline ${targetFixture} expected 200, got ${response.status}`);
+    assertNoCredentialEcho(response.body, `synthetic role mutation baseline ${targetFixture}`);
+    const state = JSON.parse(response.body);
+    assert(state.role === expectedRole, `synthetic role mutation baseline ${targetFixture} expected ${expectedRole}, got ${state.role}`);
+    assert(state.persisted === false, `synthetic role mutation baseline ${targetFixture} reported persistence`);
 }
 
 async function fetchWithCapture(url, init, label) {
