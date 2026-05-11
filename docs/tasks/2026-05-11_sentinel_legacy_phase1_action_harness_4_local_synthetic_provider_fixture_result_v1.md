@@ -79,4 +79,3 @@ This gate did not perform:
 - real Supabase calls outside the loopback fixture harness
 - secret, env, token, cookie, session, credential, signed URL, or raw provider
   output
-
