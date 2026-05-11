@@ -80,6 +80,27 @@ const FIXTURE_PLATFORM_SETTINGS = Object.freeze([
     },
 ]);
 
+const SYNTHETIC_PROVIDER_RESULTS = Object.freeze({
+    'synthetic-success': {
+        ok: true,
+        status: 'synthetic_success',
+        message: 'Synthetic provider connection succeeded.',
+        retryable: false,
+    },
+    'synthetic-retryable-failure': {
+        ok: false,
+        status: 'synthetic_retryable_failure',
+        message: 'Synthetic provider connection failed temporarily.',
+        retryable: true,
+    },
+    'synthetic-config-missing': {
+        ok: false,
+        status: 'synthetic_config_missing',
+        message: 'Synthetic provider configuration is missing.',
+        retryable: false,
+    },
+});
+
 export const fixtureRoles = Object.freeze({
     'no-session': null,
     member: 'MEMBER',
@@ -149,6 +170,11 @@ async function routeRequest({ request, response, url, user, fixtureName }) {
         return;
     }
 
+    if (url.pathname === '/fixture/provider-action') {
+        routeSyntheticProviderAction({ request, response, url, user });
+        return;
+    }
+
     if (url.pathname === '/auth/v1/user') {
         if (request.method !== 'GET') {
             writeJson(response, 405, { error: 'method_not_allowed' });
@@ -181,6 +207,44 @@ async function routeRequest({ request, response, url, user, fixtureName }) {
     }
 
     writeJson(response, 404, { error: 'fixture_not_found' });
+}
+
+function routeSyntheticProviderAction({ request, response, url, user }) {
+    if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'method_not_allowed' });
+        return;
+    }
+
+    if (!user) {
+        writeJson(response, 401, { error: 'local_fixture_no_session' });
+        return;
+    }
+
+    if (!['ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+        writeJson(response, 403, { error: 'local_fixture_provider_action_forbidden' });
+        return;
+    }
+
+    const provider = url.searchParams.get('provider');
+    if (!['meta', 'google'].includes(provider ?? '')) {
+        writeJson(response, 400, { error: 'local_fixture_unknown_provider' });
+        return;
+    }
+
+    const caseName = url.searchParams.get('case') || 'synthetic-success';
+    const result = SYNTHETIC_PROVIDER_RESULTS[caseName];
+    if (!result) {
+        writeJson(response, 400, { error: 'local_fixture_unknown_provider_case' });
+        return;
+    }
+
+    writeJson(response, 200, {
+        fixture: 'sentinel-local-provider-action',
+        provider,
+        ...result,
+        external_provider_called: false,
+        persisted: false,
+    });
 }
 
 function routeRestRequest({ request, response, url, user }) {

@@ -41,11 +41,11 @@ try {
     await checkSettingsMediaRoleMatrix(appOrigin);
     await checkNoSessionDebug(appOrigin);
     await checkDebugRoleMatrix(appOrigin);
+    await checkSyntheticProviderActionMatrix(fixtureOrigin);
 
     scanCapturesForForbiddenMarkers(captures);
     recordPass('forbidden marker scan over responses and captured logs returned zero hits');
 
-    recordBlocked('provider test actions', 'Runner does not trigger server actions because that would risk real provider fetches in current app code.');
     recordBlocked('role mutation actions', 'Fixture denies REST mutations; no local-only action harness exists yet.');
 
     printSummary();
@@ -211,6 +211,48 @@ async function checkDebugRoleMatrix(appOrigin) {
         assertNoCredentialEcho(response.body, `/api/debug ${fixtureName}`);
     }
     recordPass(`/api/debug admin fixtures ${useNextStart ? 'stay production-blocked' : 'return sanitized local debug payload'}`);
+}
+
+async function checkSyntheticProviderActionMatrix(fixtureOrigin) {
+    for (const fixtureName of ['member', 'team-manager']) {
+        const response = await fetchWithCapture(
+            `${fixtureOrigin}/fixture/provider-action?provider=meta&case=synthetic-success`,
+            { method: 'POST', redirect: 'manual', headers: fixtureHeaders(fixtureName) },
+            `POST /fixture/provider-action ${fixtureName}`
+        );
+        assert(response.status === 403, `synthetic provider action ${fixtureName} expected 403, got ${response.status}`);
+        assertNoCredentialEcho(response.body, `synthetic provider action ${fixtureName}`);
+    }
+
+    for (const fixtureName of ['admin', 'super-admin']) {
+        const success = await fetchSyntheticProviderCase(fixtureOrigin, fixtureName, 'meta', 'synthetic-success');
+        assert(success.ok === true, `synthetic provider action ${fixtureName} success case did not return ok=true`);
+        assert(success.external_provider_called === false, `synthetic provider action ${fixtureName} success case reported provider call`);
+        assert(success.persisted === false, `synthetic provider action ${fixtureName} success case reported persistence`);
+
+        const retryable = await fetchSyntheticProviderCase(fixtureOrigin, fixtureName, 'google', 'synthetic-retryable-failure');
+        assert(retryable.ok === false, `synthetic provider action ${fixtureName} retryable case did not return ok=false`);
+        assert(retryable.retryable === true, `synthetic provider action ${fixtureName} retryable case did not return retryable=true`);
+        assert(retryable.external_provider_called === false, `synthetic provider action ${fixtureName} retryable case reported provider call`);
+
+        const missingConfig = await fetchSyntheticProviderCase(fixtureOrigin, fixtureName, 'google', 'synthetic-config-missing');
+        assert(missingConfig.ok === false, `synthetic provider action ${fixtureName} missing-config case did not return ok=false`);
+        assert(missingConfig.retryable === false, `synthetic provider action ${fixtureName} missing-config case did not return retryable=false`);
+        assert(missingConfig.persisted === false, `synthetic provider action ${fixtureName} missing-config case reported persistence`);
+    }
+
+    recordPass('provider test actions use local synthetic fixture without external calls');
+}
+
+async function fetchSyntheticProviderCase(fixtureOrigin, fixtureName, provider, caseName) {
+    const response = await fetchWithCapture(
+        `${fixtureOrigin}/fixture/provider-action?provider=${provider}&case=${caseName}`,
+        { method: 'POST', redirect: 'manual', headers: fixtureHeaders(fixtureName) },
+        `POST /fixture/provider-action ${fixtureName} ${provider} ${caseName}`
+    );
+    assert(response.status === 200, `synthetic provider action ${fixtureName} ${caseName} expected 200, got ${response.status}`);
+    assertNoCredentialEcho(response.body, `synthetic provider action ${fixtureName} ${caseName}`);
+    return JSON.parse(response.body);
 }
 
 async function fetchWithCapture(url, init, label) {
