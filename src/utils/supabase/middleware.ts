@@ -1,7 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { isSentinelLocalAuthFixtureEnabled } from './local-auth-fixture'
 
 export async function updateSession(request: NextRequest) {
+    if (isSentinelLocalAuthFixtureEnabled()) {
+        return NextResponse.next({
+            request: {
+                headers: request.headers,
+            },
+        })
+    }
+
     let supabaseResponse = NextResponse.next({
         request: {
             headers: request.headers,

@@ -10,26 +10,34 @@ const FIXTURE_USERS = Object.freeze({
     member: {
         id: '00000000-0000-4000-8000-000000000101',
         email: 'member.fixture@example.invalid',
-        role: 'GUEST',
+        role: 'MEMBER',
         team_id: '00000000-0000-4000-8000-000000000201',
+        full_name: 'Fixture Member',
+        created_at: '2026-05-11T00:00:00.000Z',
     },
     'team-manager': {
         id: '00000000-0000-4000-8000-000000000102',
         email: 'team-manager.fixture@example.invalid',
         role: 'TEAM_MANAGER',
         team_id: '00000000-0000-4000-8000-000000000201',
+        full_name: 'Fixture Team Manager',
+        created_at: '2026-05-11T00:00:00.000Z',
     },
     admin: {
         id: '00000000-0000-4000-8000-000000000103',
         email: 'admin.fixture@example.invalid',
         role: 'ADMIN',
         team_id: '00000000-0000-4000-8000-000000000202',
+        full_name: 'Fixture Admin',
+        created_at: '2026-05-11T00:00:00.000Z',
     },
     'super-admin': {
         id: '00000000-0000-4000-8000-000000000104',
         email: 'super-admin.fixture@example.invalid',
         role: 'SUPER_ADMIN',
         team_id: '00000000-0000-4000-8000-000000000202',
+        full_name: 'Fixture Super Admin',
+        created_at: '2026-05-11T00:00:00.000Z',
     },
 });
 
@@ -43,13 +51,17 @@ const FIXTURE_TEAM_ACCOUNT_MAP = Object.freeze([
         id: '00000000-0000-4000-8000-000000000301',
         team_id: '00000000-0000-4000-8000-000000000201',
         account_id: 'fixture-account-001',
+        ad_account_id: 'fixture-account-001',
         platform: 'META',
+        created_at: '2026-05-11T00:00:00.000Z',
     },
     {
         id: '00000000-0000-4000-8000-000000000302',
         team_id: '00000000-0000-4000-8000-000000000202',
         account_id: 'fixture-account-002',
+        ad_account_id: 'fixture-account-002',
         platform: 'GOOGLE_ADS',
+        created_at: '2026-05-11T00:00:00.000Z',
     },
 ]);
 
@@ -70,7 +82,7 @@ const FIXTURE_PLATFORM_SETTINGS = Object.freeze([
 
 export const fixtureRoles = Object.freeze({
     'no-session': null,
-    member: 'GUEST',
+    member: 'MEMBER',
     'team-manager': 'TEAM_MANAGER',
     admin: 'ADMIN',
     'super-admin': 'SUPER_ADMIN',
@@ -181,7 +193,14 @@ function routeRestRequest({ request, response, url, user }) {
     let rows;
 
     if (table === 'users') {
-        rows = Object.values(FIXTURE_USERS).map(({ id, email, role, team_id }) => ({ id, email, role, team_id }));
+        rows = Object.values(FIXTURE_USERS).map(({ id, email, role, team_id, full_name, created_at }) => ({
+            id,
+            email,
+            role,
+            team_id,
+            full_name,
+            created_at,
+        }));
     } else if (table === 'teams') {
         rows = [...FIXTURE_TEAMS];
     } else if (table === 'team_account_map' || table === 'maps') {
@@ -234,12 +253,50 @@ function projectRows(url, rows) {
     const select = url.searchParams.get('select');
     if (!select || select === '*') return rows;
 
-    const fields = select
-        .split(',')
+    const fields = splitSelectFields(select)
         .map((field) => field.trim())
         .filter(Boolean);
 
-    return rows.map((row) => Object.fromEntries(fields.map((field) => [field, row[field] ?? null])));
+    return rows.map((row) => {
+        const projected = fields.includes('*') ? { ...row } : {};
+
+        for (const field of fields) {
+            if (field === '*') continue;
+
+            if (field === 'teams(name)') {
+                projected.teams = teamRelationForRow(row);
+                continue;
+            }
+
+            projected[field] = row[field] ?? null;
+        }
+
+        return projected;
+    });
+}
+
+function splitSelectFields(select) {
+    const fields = [];
+    let depth = 0;
+    let start = 0;
+
+    for (let index = 0; index < select.length; index += 1) {
+        const char = select[index];
+        if (char === '(') depth += 1;
+        if (char === ')') depth = Math.max(0, depth - 1);
+        if (char === ',' && depth === 0) {
+            fields.push(select.slice(start, index));
+            start = index + 1;
+        }
+    }
+
+    fields.push(select.slice(start));
+    return fields;
+}
+
+function teamRelationForRow(row) {
+    const team = FIXTURE_TEAMS.find((candidate) => candidate.id === row.team_id);
+    return team ? { name: team.name } : null;
 }
 
 function fixtureNameFromRequest(request) {

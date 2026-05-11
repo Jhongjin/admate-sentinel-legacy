@@ -38,12 +38,13 @@ try {
 
     await checkLoginPage(appOrigin);
     await checkNoSessionSettingsMedia(appOrigin);
+    await checkSettingsMediaRoleMatrix(appOrigin);
     await checkNoSessionDebug(appOrigin);
+    await checkDebugRoleMatrix(appOrigin);
 
     scanCapturesForForbiddenMarkers(captures);
     recordPass('forbidden marker scan over responses and captured logs returned zero hits');
 
-    recordBlocked('authenticated role matrix', 'Supabase SSR cookie compatibility is not emulated in this first pass without an approved app-code seam.');
     recordBlocked('provider test actions', 'Runner does not trigger server actions because that would risk real provider fetches in current app code.');
     recordBlocked('role mutation actions', 'Fixture denies REST mutations; no local-only action harness exists yet.');
 
@@ -120,6 +121,7 @@ function sanitizedNextEnv(fixtureOrigin, mode) {
     env.NEXT_PUBLIC_SUPABASE_URL = fixtureOrigin;
     env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'sentinel-local-anon-key';
     env.SUPABASE_SERVICE_ROLE_KEY = 'sentinel-local-service-role-disabled';
+    env.SENTINEL_LOCAL_AUTH_FIXTURE = '1';
     if (mode === 'start') env.NODE_ENV = 'production';
     return env;
 }
@@ -140,6 +142,32 @@ async function checkNoSessionSettingsMedia(appOrigin) {
     recordPass('/settings/media no-session redirects or denies safely');
 }
 
+async function checkSettingsMediaRoleMatrix(appOrigin) {
+    for (const fixtureName of ['member', 'team-manager']) {
+        const response = await fetchWithCapture(
+            `${appOrigin}/settings/media`,
+            { redirect: 'manual', headers: fixtureHeaders(fixtureName) },
+            `GET /settings/media ${fixtureName}`
+        );
+        assert(response.status === 200, `/settings/media ${fixtureName} expected safe 200 denial, got ${response.status}`);
+        assert(response.body.includes('권한이 부족합니다'), `/settings/media ${fixtureName} did not render the insufficient-permission boundary`);
+        assertNoCredentialEcho(response.body, `/settings/media ${fixtureName}`);
+    }
+    recordPass('/settings/media member and team-manager fixtures render safe denial');
+
+    for (const fixtureName of ['admin', 'super-admin']) {
+        const response = await fetchWithCapture(
+            `${appOrigin}/settings/media`,
+            { redirect: 'manual', headers: fixtureHeaders(fixtureName) },
+            `GET /settings/media ${fixtureName}`
+        );
+        assert(response.status === 200, `/settings/media ${fixtureName} expected 200, got ${response.status}`);
+        assert(response.body.includes('매체 연동 관리'), `/settings/media ${fixtureName} did not render the admin media settings surface`);
+        assertNoCredentialEcho(response.body, `/settings/media ${fixtureName}`);
+    }
+    recordPass('/settings/media admin and super-admin fixtures render without credential echo');
+}
+
 async function checkNoSessionDebug(appOrigin) {
     const response = await fetchWithCapture(`${appOrigin}/api/debug`, { redirect: 'manual' }, 'GET /api/debug no-session');
     const expected = useNextStart ? response.status === 404 : [401, 404].includes(response.status);
@@ -148,6 +176,41 @@ async function checkNoSessionDebug(appOrigin) {
     assert(!response.body.includes('"teams"'), '/api/debug response exposed teams key');
     assert(!response.body.includes('"maps"'), '/api/debug response exposed maps key');
     recordPass(`/api/debug no-session returns safe ${response.status}`);
+}
+
+async function checkDebugRoleMatrix(appOrigin) {
+    for (const fixtureName of ['member', 'team-manager']) {
+        const response = await fetchWithCapture(
+            `${appOrigin}/api/debug`,
+            { redirect: 'manual', headers: fixtureHeaders(fixtureName) },
+            `GET /api/debug ${fixtureName}`
+        );
+        const expectedStatus = useNextStart ? 404 : 403;
+        assert(response.status === expectedStatus, `/api/debug ${fixtureName} expected ${expectedStatus}, got ${response.status}`);
+        assert(!response.body.includes('"users"'), `/api/debug ${fixtureName} exposed users key`);
+        assert(!response.body.includes('"teams"'), `/api/debug ${fixtureName} exposed teams key`);
+        assert(!response.body.includes('"maps"'), `/api/debug ${fixtureName} exposed maps key`);
+    }
+    recordPass(`/api/debug non-admin fixtures return safe ${useNextStart ? 404 : 403}`);
+
+    for (const fixtureName of ['admin', 'super-admin']) {
+        const response = await fetchWithCapture(
+            `${appOrigin}/api/debug`,
+            { redirect: 'manual', headers: fixtureHeaders(fixtureName) },
+            `GET /api/debug ${fixtureName}`
+        );
+        if (useNextStart) {
+            assert(response.status === 404, `/api/debug ${fixtureName} production mode expected 404, got ${response.status}`);
+            assert(!response.body.includes('"users"'), `/api/debug ${fixtureName} production mode exposed users key`);
+            continue;
+        }
+        assert(response.status === 200, `/api/debug ${fixtureName} expected 200, got ${response.status}`);
+        assert(response.body.includes('"users"'), `/api/debug ${fixtureName} did not return local debug users`);
+        assert(response.body.includes('"teams"'), `/api/debug ${fixtureName} did not return local debug teams`);
+        assert(response.body.includes('"maps"'), `/api/debug ${fixtureName} did not return local debug maps`);
+        assertNoCredentialEcho(response.body, `/api/debug ${fixtureName}`);
+    }
+    recordPass(`/api/debug admin fixtures ${useNextStart ? 'stay production-blocked' : 'return sanitized local debug payload'}`);
 }
 
 async function fetchWithCapture(url, init, label) {
@@ -165,6 +228,24 @@ async function fetchWithCapture(url, init, label) {
         ].filter(Boolean).join('\n'),
     });
     return { response, status: response.status, headers: response.headers, body };
+}
+
+function fixtureHeaders(fixtureName) {
+    return { 'x-sentinel-fixture': fixtureName };
+}
+
+function assertNoCredentialEcho(body, label) {
+    const forbidden = [
+        /fixture-[a-z-]*(secret|token)/i,
+        /"access_token"\s*:\s*"[^"]+"/i,
+        /"refresh_token"\s*:\s*"[^"]+"/i,
+        /"app_secret"\s*:\s*"[^"]+"/i,
+        /name="(?:appSecret|refreshToken|accessToken)"\s+value="[^"]+"/i,
+    ];
+
+    for (const pattern of forbidden) {
+        assert(!pattern.test(body), `${label} echoed a credential-like value`);
+    }
 }
 
 async function fetchJson(url) {
