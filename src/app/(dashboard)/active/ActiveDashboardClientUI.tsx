@@ -2,89 +2,214 @@
 
 import { useState } from 'react';
 import {
-    Activity, ArrowUpRight, ArrowDownRight, DollarSign, MousePointerClick,
-    TrendingUp, Users, AlertTriangle, CheckCircle2, BarChart3, Clock, AlertCircle
+    AlertTriangle, CheckCircle2, Clock, FileSpreadsheet, RadioTower, ShieldCheck
 } from 'lucide-react';
 import { format } from 'date-fns';
+
+type KpiRecord = {
+    title: string;
+    value: string | number;
+    change?: string;
+    isPositive?: boolean;
+    icon?: string;
+};
+
+type LiveCampaignRecord = {
+    id: string;
+    account_id?: string | null;
+    name?: string | null;
+    objective?: string | null;
+    effective_status?: string | null;
+};
+
+type RecentAuditRecord = {
+    id: string;
+    created_at: string;
+    total_campaigns?: number | null;
+    error_count?: number | null;
+};
 
 export default function ActiveDashboardClientUI({
     kpis,
     liveCampaigns,
     recentAudits
 }: {
-    kpis: any[];
-    liveCampaigns: any[];
-    recentAudits: any[];
+    kpis: KpiRecord[];
+    liveCampaigns: LiveCampaignRecord[];
+    recentAudits: RecentAuditRecord[];
 }) {
     const [activeTab, setActiveTab] = useState<'meta' | 'google'>('meta');
+    const activeCampaigns = liveCampaigns.filter((campaign) => campaign.effective_status === 'ACTIVE').length;
+    const pausedCampaigns = liveCampaigns.filter((campaign) => campaign.effective_status === 'PAUSED').length;
+    const recentFailAudits = recentAudits.filter((audit) => (audit.error_count || 0) > 0).length;
+    const recentAuditScope = recentAudits.reduce((sum, audit) => sum + (audit.total_campaigns || 0), 0);
+    const legacyKpiCount = kpis.length;
+    const gateStatus = recentFailAudits > 0 ? '검토 필요' : recentAudits.length > 0 ? '통과 유지' : '대기';
+    const gateTone = recentFailAudits > 0 ? 'amber' : recentAudits.length > 0 ? 'emerald' : 'slate';
+    const gatePanels = [
+        {
+            label: 'Launch Gate',
+            value: gateStatus,
+            helper: recentFailAudits > 0 ? `${recentFailAudits}개 검수에서 불일치 발견` : '최근 검수 기준 이상 없음',
+        },
+        {
+            label: 'Mapped Campaigns',
+            value: liveCampaigns.length.toLocaleString(),
+            helper: `${activeCampaigns} active / ${pausedCampaigns} paused`,
+        },
+        {
+            label: 'Recent Audit Scope',
+            value: recentAuditScope.toLocaleString(),
+            helper: `${recentAudits.length}개 최근 검수 로그`,
+        },
+        {
+            label: 'Platform Boundary',
+            value: activeTab === 'meta' ? 'Meta' : 'Google',
+            helper: activeTab === 'meta' ? '계정 매핑 기반 상태 확인' : '연동 준비 중',
+        },
+        {
+            label: 'Legacy Metrics',
+            value: legacyKpiCount.toLocaleString(),
+            helper: '성과 KPI는 launch gate 판단에서 분리',
+        },
+    ];
 
     return (
         <div className="space-y-6 max-w-7xl animate-in fade-in duration-500 pb-12">
-            <div className="relative overflow-hidden bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl shadow-lg p-8 text-white">
-                <div className="relative z-10">
-                    <h1 className="text-3xl font-bold tracking-tight mb-2">실시간 대시보드</h1>
-                    <p className="text-indigo-100 text-lg opacity-90 max-w-2xl">
-                        팀에 매핑된 Meta 광고 계정의 라이브 캠페인과 최근 검수 내역을 한눈에 파악하세요.
-                    </p>
+            <section className="overflow-hidden rounded-md border border-slate-300 bg-white shadow-sm">
+                <div className="grid gap-px bg-slate-300 lg:grid-cols-[minmax(0,1fr)_320px]">
+                    <div className="bg-[#101820] p-6 text-white">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center gap-2 rounded-sm border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-100">
+                                <ShieldCheck className="h-3.5 w-3.5" />
+                                Pre-launch Validation
+                            </span>
+                            <span className={`inline-flex items-center gap-2 rounded-sm border px-3 py-1.5 text-[11px] font-bold ${
+                                gateTone === 'amber'
+                                    ? 'border-amber-300/40 bg-amber-300/10 text-amber-100'
+                                    : gateTone === 'emerald'
+                                        ? 'border-emerald-300/35 bg-emerald-300/10 text-emerald-100'
+                                        : 'border-slate-500 bg-white/5 text-slate-300'
+                            }`}>
+                                <span className={`h-2 w-2 rounded-full ${
+                                    gateTone === 'amber' ? 'bg-amber-300' : gateTone === 'emerald' ? 'bg-emerald-300' : 'bg-slate-400'
+                                }`} />
+                                {gateStatus}
+                            </span>
+                        </div>
+                        <h1 className="mt-5 max-w-3xl text-4xl font-bold leading-tight tracking-tight">
+                            Sentinel Launch Gate
+                        </h1>
+                        <p className="mt-3 max-w-3xl text-sm font-medium leading-7 text-slate-300">
+                            미디어믹스 기준값과 실제 매체 세팅을 대조하기 전에, 팀 매핑 캠페인과 최근 검수
+                            결과를 먼저 보는 사전 집행 보호 보드입니다.
+                        </p>
+                        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                            {[
+                                ['Source of truth', 'Media mix Excel'],
+                                ['Actual state', 'Meta / Google Ads'],
+                                ['Decision', 'Pass · Warning · Fail'],
+                            ].map(([label, value]) => (
+                                <div key={label} className="border border-white/10 bg-white/[0.06] px-3 py-3">
+                                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+                                    <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <aside className="bg-[#f7f9f8] p-5">
+                        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                            <RadioTower className="h-4 w-4 text-cyan-700" />
+                            Gate Watch
+                        </div>
+                        <div className="mt-4 space-y-3">
+                            <div className="rounded-md border border-slate-300 bg-white p-4">
+                                <p className="text-xs font-semibold text-slate-500">이번 화면의 목적</p>
+                                <p className="mt-2 text-xl font-bold text-slate-950">집행 전 사고 방지</p>
+                                <p className="mt-2 text-xs leading-5 text-slate-600">
+                                    예산, 일정, 랜딩 URL, UTM, 픽셀/이벤트 불일치를 launch gate에서 먼저 확인합니다.
+                                </p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div className="rounded-md border border-slate-300 bg-white p-3">
+                                    <p className="text-[11px] font-bold text-slate-500">Active</p>
+                                    <p className="mt-1 text-2xl font-bold text-slate-950">{activeCampaigns}</p>
+                                </div>
+                                <div className="rounded-md border border-slate-300 bg-white p-3">
+                                    <p className="text-[11px] font-bold text-slate-500">Review</p>
+                                    <p className="mt-1 text-2xl font-bold text-slate-950">{recentFailAudits}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </aside>
                 </div>
-                <div className="absolute right-0 top-0 opacity-10 transform translate-x-1/3 -translate-y-1/4">
-                    <BarChart3 className="w-64 h-64" />
+
+                <div className="grid gap-px bg-slate-300 md:grid-cols-5">
+                    {gatePanels.map((panel) => (
+                        <div key={panel.label} className="bg-white px-4 py-4">
+                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">{panel.label}</p>
+                            <p className="mt-2 text-2xl font-bold text-slate-950">{panel.value}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-500">{panel.helper}</p>
+                        </div>
+                    ))}
                 </div>
-            </div>
+            </section>
 
             <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-px">
                 <button
                     onClick={() => setActiveTab('meta')}
-                    className={`px-6 py-3 font-semibold text-sm border-b-2 transition-colors ${activeTab === 'meta' ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400' : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                    className={`px-6 py-3 font-semibold text-sm border-b-2 transition-colors ${activeTab === 'meta' ? 'border-cyan-700 text-cyan-800 dark:border-cyan-400 dark:text-cyan-400' : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
                 >
                     Meta (Facebook/Instagram)
                 </button>
                 <button
                     onClick={() => setActiveTab('google')}
-                    className={`px-6 py-3 font-semibold text-sm border-b-2 transition-colors ${activeTab === 'google' ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400' : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                    className={`px-6 py-3 font-semibold text-sm border-b-2 transition-colors ${activeTab === 'google' ? 'border-cyan-700 text-cyan-800 dark:border-cyan-400 dark:text-cyan-400' : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
                 >
                     Google Ads
                 </button>
             </div>
 
             {activeTab === 'google' ? (
-                <div className="flex flex-col items-center justify-center p-20 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-center">
-                    <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/20 text-blue-500 rounded-2xl flex items-center justify-center mb-4">
-                        <BarChart3 className="w-8 h-8" />
+                <div className="flex flex-col items-center justify-center rounded-md border border-zinc-200 bg-white p-20 text-center dark:border-zinc-800 dark:bg-zinc-900">
+                    <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 text-cyan-700 dark:bg-cyan-900/20">
+                        <FileSpreadsheet className="h-8 w-8" />
                     </div>
-                    <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">Google Ads 연동 준비 중</h2>
+                    <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">Google Ads launch gate 준비 중</h2>
                     <p className="text-zinc-500 dark:text-zinc-400 mt-2 max-w-sm">
-                        Google Ads API 승인 후 업데이트 예정입니다.
+                        Google Ads API 승인 후 미디어믹스 기준값과 실제 세팅 대조 흐름을 이 보드에 연결합니다.
                     </p>
                 </div>
             ) : (
                 <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        {kpis.map((kpi, index) => {
-                            const Icon = kpi.icon === 'DollarSign' ? DollarSign : kpi.icon === 'Users' ? Users : kpi.icon === 'MousePointerClick' ? MousePointerClick : TrendingUp;
-                            return (
-                                <div key={index} className="bg-white dark:bg-zinc-900 rounded-xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm relative overflow-hidden group">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg group-hover:scale-110 transition-transform">
-                                            <Icon className="w-6 h-6" />
-                                        </div>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                        {[
+                            { title: 'Launch readiness', value: gateStatus, icon: ShieldCheck, helper: '최근 검수 이력 기반' },
+                            { title: 'Live mapping scope', value: liveCampaigns.length.toLocaleString(), icon: RadioTower, helper: '팀 매핑 Meta 캠페인' },
+                            { title: 'Audit review load', value: recentFailAudits.toLocaleString(), icon: AlertTriangle, helper: '최근 검수 중 FAIL 포함' },
+                        ].map((card) => (
+                            <div key={card.title} className="relative overflow-hidden rounded-md border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <h3 className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">{card.title}</h3>
+                                        <p className="mt-2 text-2xl font-bold text-zinc-950 dark:text-zinc-50">{card.value}</p>
+                                        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{card.helper}</p>
                                     </div>
-                                    <h3 className="text-zinc-500 dark:text-zinc-400 text-sm font-medium">{kpi.title}</h3>
-                                    <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-50 mt-1">{kpi.value.toLocaleString()}</p>
-                                    <div className="absolute -bottom-4 -right-4 opactity-5 text-indigo-100 dark:text-zinc-800 transform rotate-12 group-hover:rotate-0 transition-transform duration-500 z-0 opacity-10">
-                                        <Icon className="w-24 h-24" />
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-md border border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900 dark:bg-cyan-900/20 dark:text-cyan-300">
+                                        <card.icon className="h-5 w-5" />
                                     </div>
                                 </div>
-                            );
-                        })}
+                            </div>
+                        ))}
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden flex flex-col h-96">
                             <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 shrink-0">
                                 <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                                    팀 매핑 라이브 캠페인
-                                    <span className="bg-indigo-100 text-indigo-700 text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider">Live</span>
+                                    팀 매핑 캠페인 상태
+                                    <span className="bg-cyan-100 text-cyan-800 text-[10px] px-2 py-0.5 rounded-sm uppercase font-bold tracking-wider">Pre-check scope</span>
                                 </h2>
                             </div>
                             <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -127,7 +252,7 @@ export default function ActiveDashboardClientUI({
 
                         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col h-96">
                             <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 flex items-center p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 shrink-0 gap-2">
-                                <Clock className="w-5 h-5 text-indigo-500" /> 최근 실시간 검수 내역
+                                <Clock className="w-5 h-5 text-cyan-700" /> 최근 launch gate 검수
                             </h2>
                             <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                                 {recentAudits.length === 0 && (
