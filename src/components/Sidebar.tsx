@@ -12,7 +12,8 @@ import {
     LogOut,
     UserCheck,
     Network,
-    FolderGit2
+    FolderGit2,
+    RadioTower
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
@@ -75,9 +76,9 @@ export default function Sidebar() {
     ];
 
     const getRoleBadgeColor = () => {
-        if (role === 'SUPER_ADMIN' || role === 'ADMIN') return 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400 border-rose-200 dark:border-rose-800/50';
-        if (role === 'TEAM_MANAGER') return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/50';
-        return 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700';
+        if (role === 'SUPER_ADMIN' || role === 'ADMIN') return 'bg-amber-100 text-amber-900 border-amber-200';
+        if (role === 'TEAM_MANAGER') return 'bg-cyan-100 text-cyan-900 border-cyan-200';
+        return 'bg-slate-100 text-slate-700 border-slate-200';
     };
 
     const roleLabel = {
@@ -89,23 +90,34 @@ export default function Sidebar() {
     }[role] || '알 수 없음';
 
     return (
-        <aside className="fixed top-0 left-0 z-50 w-72 h-screen bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex flex-col transition-all">
+        <aside className="fixed top-0 left-0 z-50 w-72 h-screen bg-[#111820] border-r border-slate-800 flex flex-col transition-all text-slate-100">
             {/* Brand */}
-            <div className="h-16 flex items-center gap-3 px-6 border-b border-zinc-200 dark:border-zinc-800">
-                <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
-                    <ShieldCheck className="w-5 h-5 text-white" />
+            <div className="h-20 flex items-center gap-3 px-5 border-b border-slate-800 bg-[#0c1218]">
+                <div className="w-10 h-10 rounded-md bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center flex-shrink-0">
+                    <ShieldCheck className="w-5 h-5 text-cyan-300" />
                 </div>
-                <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">Ad-Sentinel</h1>
+                <div>
+                    <h1 className="text-lg font-bold tracking-tight text-white">Ad-Sentinel</h1>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Ops Console</p>
+                </div>
+            </div>
+
+            <div className="mx-4 mt-4 rounded-md border border-cyan-400/20 bg-cyan-400/10 px-3 py-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-cyan-200">
+                    <RadioTower className="h-4 w-4" />
+                    Launch Gate Monitoring
+                </div>
+                <p className="mt-1 text-[11px] leading-4 text-slate-400">Prelaunch checks and media discrepancy review.</p>
             </div>
 
             {/* Navigation */}
-            <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-4 custom-scrollbar">
+            <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-5 custom-scrollbar">
                 {menuGroups.map((group, gIdx) => {
                     const visibleItems = group.items.filter(item => item.roles.includes(role));
                     if (visibleItems.length === 0) return null;
                     return (
                         <div key={gIdx} className="space-y-1">
-                            <p className="px-3 text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-2">
+                            <p className="px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 mb-2">
                                 {group.groupName}
                             </p>
                             {visibleItems.map((item) => {
@@ -114,9 +126,9 @@ export default function Sidebar() {
                                     <Link
                                         key={item.href}
                                         href={item.href}
-                                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${isActive
-                                            ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400'
-                                            : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-100'
+                                        className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${isActive
+                                            ? 'bg-cyan-400/12 text-cyan-100 ring-1 ring-cyan-400/25'
+                                            : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
                                             }`}
                                     >
                                         <item.icon className="w-5 h-5 flex-shrink-0" />
@@ -130,25 +142,25 @@ export default function Sidebar() {
             </nav>
 
             {/* User Profile Footer */}
-            <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30">
+            <div className="p-4 border-t border-slate-800 bg-[#0c1218]">
                 <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-full bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
-                        <span className="text-zinc-600 dark:text-zinc-400 font-medium">
+                    <div className="w-10 h-10 rounded-md bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
+                        <span className="text-slate-300 font-medium">
                             {userEmail.charAt(0).toUpperCase()}
                         </span>
                     </div>
                     <div className="flex-1 overflow-hidden ml-1">
-                        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                        <p className="text-sm font-medium text-slate-100 truncate">
                             {userEmail}
                         </p>
-                        <span className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-semibold border ${getRoleBadgeColor()}`}>
+                        <span className={`inline-block mt-1 px-2 py-0.5 rounded-sm text-xs font-semibold border ${getRoleBadgeColor()}`}>
                             {roleLabel}
                         </span>
                     </div>
                 </div>
                 <button
                     onClick={handleLogout}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors border border-transparent hover:border-zinc-300 dark:hover:border-zinc-700"
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-white/5 rounded-md transition-colors border border-slate-800 hover:border-slate-700"
                 >
                     <LogOut className="w-4 h-4" />
                     로그아웃

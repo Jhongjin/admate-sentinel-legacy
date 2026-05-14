@@ -40,10 +40,10 @@ export default async function DashboardLayout({
     }
 
     return (
-        <div className={`${inter.className} min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 flex`}>
+        <div className={`${inter.className} min-h-screen bg-[#eef1f3] text-slate-950 flex`}>
             <Sidebar />
             <main className="flex-1 ml-72">
-                <div className="p-8 max-w-7xl mx-auto">
+                <div className="px-8 py-6 max-w-[1680px] mx-auto">
                     {children}
                 </div>
             </main>
