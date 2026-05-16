@@ -40,11 +40,6 @@ contracts.
 
 Run from this repository:
 
-- `npm run sentinel:local-auth-matrix` passed.
-  - 13 checks passed.
-  - No-session, member, team-manager, admin, and super-admin fixture paths
-    behaved as expected.
-  - Credential echo scan over captured responses/logs returned zero hits.
 - `npm run lint` failed.
   - Main blockers: explicit `any`, unused variables, root debug/test script
     lint violations, and one React immutability rule violation.
@@ -53,6 +48,22 @@ Run from this repository:
     API route because Supabase URL/anon key were not configured locally.
   - The build also reported invalid/deprecated config warnings around the
     current Next.js version.
+
+Commander follow-up rerun on 2026-05-16:
+
+- `npm run sentinel:local-auth-matrix` failed after 4 passes and 1 failure.
+  - `/login` rendered for no-session.
+  - `/settings/media` no-session expected a login redirect or safe denial, but
+    returned `404`.
+  - This should be treated as either route/harness drift or an access-boundary
+    regression until reproduced and fixed.
+- `npm run lint` still failed with the same class of blockers: explicit `any`,
+  unused variables, root debug/test script lint violations, and React
+  immutability/no-unescaped-entities issues.
+- `npm run build` still failed during page-data collection because local
+  Supabase URL/anon key values were not configured. The build also surfaced
+  Next.js 16 warnings for deprecated `middleware` convention and unsupported
+  `eslint` config in `next.config.ts`.
 
 ## Production Gate
 
@@ -65,6 +76,8 @@ items are resolved:
   explicitly remove the claim.
 - Remove production reliance on ignored TypeScript/ESLint errors.
 - Complete Phase 1 hardening items from `docs/security-phase1-hardening-plan.md`.
+- Repair the local auth matrix or `/settings/media` no-session boundary before
+  using the fixture harness as a green production-readiness signal.
 - Move required parser/comparison/history behavior into Core-native Sentinel
   contracts instead of directly merging Legacy surfaces.
 
