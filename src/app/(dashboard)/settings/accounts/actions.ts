@@ -2,13 +2,13 @@
 
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { hasSentinelRole, resolveSentinelActor } from '@/lib/auth/sentinel-profile-boundary';
 
 async function requireAdmin() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Unauthorized');
-    const { data: adminData } = await supabase.from('users').select('role').eq('id', user.id).single();
-    if (!adminData || !['SUPER_ADMIN', 'ADMIN'].includes(adminData.role)) {
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) throw new Error('Unauthorized');
+    if (!hasSentinelRole(actorResolution.actor, ['SUPER_ADMIN', 'ADMIN'])) {
         throw new Error('Forbidden');
     }
     return supabase;

@@ -1,14 +1,14 @@
 import { createClient } from '@/utils/supabase/server';
+import { resolveSentinelActor } from '@/lib/auth/sentinel-profile-boundary';
 import { Gauge, RadioTower, ShieldCheck } from 'lucide-react';
 import AuditClientUI from './AuditClientUI';
 
 export default async function AuditPage() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-
-    // Fetch user details for team
-    const { data: myUser } = await supabase.from('users').select('*, teams(name)').eq('id', user.id).single();
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) return null;
+    const myUser = actorResolution.actor;
+    const teamRelation = Array.isArray(myUser.teams) ? myUser.teams[0] : myUser.teams;
 
     return (
         <div className="space-y-4 flex flex-col h-[calc(100vh-3rem)]">
@@ -35,7 +35,10 @@ export default async function AuditPage() {
                 </div>
             </header>
 
-            <AuditClientUI teamId={myUser?.team_id} teamName={myUser?.teams?.name} />
+            <AuditClientUI
+                teamId={myUser.team_id || undefined}
+                teamName={teamRelation?.name || undefined}
+            />
         </div>
     );
 }

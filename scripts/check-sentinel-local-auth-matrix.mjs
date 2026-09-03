@@ -37,6 +37,7 @@ try {
     recordPass(`Next ${useNextStart ? 'start' : 'dev'} server responded on ${appOrigin}`);
 
     await checkLoginPage(appOrigin);
+    await checkSessionProfileMatrix(appOrigin);
     await checkNoSessionSettingsMedia(appOrigin);
     await checkSettingsMediaRoleMatrix(appOrigin);
     await checkNoSessionDebug(appOrigin);
@@ -130,6 +131,40 @@ async function checkLoginPage(appOrigin) {
     assert(response.status === 200, `/login expected 200, got ${response.status}`);
     assert(response.body.includes('Ad-Sentinel'), '/login did not render expected app name');
     recordPass('/login renders for no-session');
+}
+
+async function checkSessionProfileMatrix(appOrigin) {
+    const noSession = await fetchWithCapture(
+        `${appOrigin}/api/session/profile`,
+        { redirect: 'manual' },
+        'GET /api/session/profile no-session'
+    );
+    assert(noSession.status === 401, `/api/session/profile no-session expected 401, got ${noSession.status}`);
+
+    const expectedRoles = {
+        member: 'MEMBER',
+        'team-manager': 'TEAM_MANAGER',
+        admin: 'ADMIN',
+        'super-admin': 'SUPER_ADMIN',
+    };
+
+    for (const [fixtureName, expectedRole] of Object.entries(expectedRoles)) {
+        const response = await fetchWithCapture(
+            `${appOrigin}/api/session/profile`,
+            { redirect: 'manual', headers: fixtureHeaders(fixtureName) },
+            `GET /api/session/profile ${fixtureName}`
+        );
+        assert(response.status === 200, `/api/session/profile ${fixtureName} expected 200, got ${response.status}`);
+        const profile = JSON.parse(response.body);
+        assert(profile.authenticated === true, `/api/session/profile ${fixtureName} did not confirm session`);
+        assert(profile.profile_present === true, `/api/session/profile ${fixtureName} did not confirm profile`);
+        assert(profile.organization_membership === 'current', `/api/session/profile ${fixtureName} did not confirm organization`);
+        assert(profile.role === expectedRole, `/api/session/profile ${fixtureName} returned an unexpected role`);
+        assert(!/00000000-0000-4000-8000-|@example\.invalid/.test(response.body), `/api/session/profile ${fixtureName} exposed an identifier`);
+        assertNoCredentialEcho(response.body, `/api/session/profile ${fixtureName}`);
+    }
+
+    recordPass('/api/session/profile returns browser-safe role and membership fields only');
 }
 
 async function checkNoSessionSettingsMedia(appOrigin) {

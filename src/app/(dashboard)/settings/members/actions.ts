@@ -1,58 +1,33 @@
 'use server';
 
 import { createClient } from '@/utils/supabase/server';
-import { createClient as createAdminClient } from '@supabase/supabase-js';
+import {
+    deleteSentinelMemberForAdministrator,
+    inviteSentinelMemberForActor,
+    resolveSentinelActor,
+    type SentinelRole,
+    updateSentinelProfileForAdministrator,
+} from '@/lib/auth/sentinel-profile-boundary';
 import { revalidatePath } from 'next/cache';
 
-// Require SERVICE_ROLE to manage users bypassing RLS
-const supabaseAdmin = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY! || ''
-);
-
 export async function inviteMemberAction(formData: FormData): Promise<void> {
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        console.error('Service Role Key가 환경변수에 설정되지 않아 이메일 초대 기능을 사용할 수 없습니다.');
-        return;
-    }
-
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: adminData } = await supabase.from('users').select('role, team_id').eq('id', user.id).single();
-    if (!adminData || !['SUPER_ADMIN', 'ADMIN', 'TEAM_MANAGER'].includes(adminData.role)) {
-        console.error('권한이 부족합니다.');
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) {
+        console.error('sentinel_member_invitation_authority_missing');
         return;
     }
 
-    const email = formData.get('email') as string;
-    let targetRole = formData.get('role') as string;
-    let targetTeamId = formData.get('teamId') as string;
-
-    // Team Manager restriction: Can only invite as MEMBER strictly to their own team
-    if (adminData.role === 'TEAM_MANAGER') {
-        targetRole = 'MEMBER';
-        targetTeamId = adminData.team_id;
-    }
-
-    // 1. Invite User
-    const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email);
-    if (error) {
-        console.error('Invite Error:', error);
+    try {
+        await inviteSentinelMemberForActor({
+            actor: actorResolution.actor,
+            email: String(formData.get('email') || ''),
+            role: String(formData.get('role') || 'MEMBER') as SentinelRole,
+            teamId: String(formData.get('teamId') || '') || null,
+        });
+    } catch {
+        console.error('sentinel_member_invitation_failed');
         return;
-    }
-
-    // 2. Wait for the DB trigger (handle_new_user) to insert the public.users row
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    // 3. Update their role and team in public.users
-    if (data.user) {
-        const userId = data.user.id;
-        const payload: any = { role: targetRole };
-        if (targetTeamId) payload.team_id = targetTeamId;
-
-        await supabaseAdmin.from('users').update(payload).eq('id', userId);
     }
 
     revalidatePath('/settings/members');
@@ -60,32 +35,24 @@ export async function inviteMemberAction(formData: FormData): Promise<void> {
 
 export async function updateMemberAction(formData: FormData): Promise<void> {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: adminData } = await supabase.from('users').select('role').eq('id', user.id).single();
-    if (!adminData || !['SUPER_ADMIN', 'ADMIN'].includes(adminData.role)) {
-        console.error('이 수정 기능은 관리자만 사용할 수 있습니다.');
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) {
+        console.error('sentinel_member_update_authority_missing');
         return;
     }
 
-    const targetUserId = formData.get('userId') as string;
-    const role = formData.get('role') as string;
-    const teamId = formData.get('teamId') as string;
-    const fullName = formData.get('fullName') as string | null;
+    const fullNameValue = formData.get('fullName');
 
-    const payload: any = { role };
-    // Empty string means unassigned
-    payload.team_id = teamId ? teamId : null;
-
-    // Only update full_name if it was provided in the form
-    if (fullName !== null) {
-        payload.full_name = fullName.trim() || null;
-    }
-
-    const { error } = await supabaseAdmin.from('users').update(payload).eq('id', targetUserId);
-    if (error) {
-        console.error('Update Error:', error);
+    try {
+        await updateSentinelProfileForAdministrator({
+            actor: actorResolution.actor,
+            targetUserId: String(formData.get('userId') || ''),
+            role: String(formData.get('role') || '') as SentinelRole,
+            teamId: String(formData.get('teamId') || '') || null,
+            fullName: typeof fullNameValue === 'string' ? fullNameValue.trim() || null : undefined,
+        });
+    } catch {
+        console.error('sentinel_member_update_failed');
         return;
     }
 
@@ -93,31 +60,20 @@ export async function updateMemberAction(formData: FormData): Promise<void> {
 }
 
 export async function deleteMemberAction(formData: FormData): Promise<void> {
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        console.error('Service Role Key가 환경변수에 설정되지 않아 회원 삭제 기능을 사용할 수 없습니다.');
-        return;
-    }
-
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: adminData } = await supabase.from('users').select('role').eq('id', user.id).single();
-    if (!adminData || !['SUPER_ADMIN', 'ADMIN'].includes(adminData.role)) {
-        console.error('이 삭제 기능은 관리자만 사용할 수 있습니다.');
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) {
+        console.error('sentinel_member_delete_authority_missing');
         return;
     }
 
-    const targetUserId = formData.get('userId') as string;
-
-    if (targetUserId === user.id) {
-        console.error('자기 자신을 삭제할 수 없습니다.');
-        return;
-    }
-
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(targetUserId);
-    if (error) {
-        console.error('Delete Error:', error);
+    try {
+        await deleteSentinelMemberForAdministrator({
+            actor: actorResolution.actor,
+            targetUserId: String(formData.get('userId') || ''),
+        });
+    } catch {
+        console.error('sentinel_member_delete_failed');
         return;
     }
 

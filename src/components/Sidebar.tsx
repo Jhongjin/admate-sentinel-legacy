@@ -23,22 +23,23 @@ type Role = 'SUPER_ADMIN' | 'ADMIN' | 'TEAM_MANAGER' | 'MEMBER' | 'GUEST';
 export default function Sidebar() {
     const pathname = usePathname();
     const router = useRouter();
-    const supabase = createClient();
+    const [supabase] = useState(() => createClient());
 
     // Auth State
-    const [userEmail, setUserEmail] = useState<string>('Loading...');
+    const [userLabel, setUserLabel] = useState<string>('Loading...');
     const [role, setRole] = useState<Role>('GUEST');
 
     useEffect(() => {
         const fetchUser = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                setUserEmail(user.email || '');
-                // Fetch real role from DB
-                const { data } = await supabase.from('users').select('role').eq('id', user.id).single();
-                if (data?.role) {
-                    setRole(data.role as Role);
-                }
+            const response = await fetch('/api/session/profile', {
+                cache: 'no-store',
+                credentials: 'same-origin',
+            });
+            if (!response.ok) return;
+            const profile = await response.json();
+            if (profile?.profile_present === true && profile?.role) {
+                setUserLabel(profile.display_label || '로그인 계정');
+                setRole(profile.role as Role);
             }
         };
         fetchUser();
@@ -146,12 +147,12 @@ export default function Sidebar() {
                 <div className="flex items-center gap-3 mb-3">
                     <div className="w-10 h-10 rounded-md bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
                         <span className="text-slate-300 font-medium">
-                            {userEmail.charAt(0).toUpperCase()}
+                            {userLabel.charAt(0).toUpperCase()}
                         </span>
                     </div>
                     <div className="flex-1 overflow-hidden ml-1">
                         <p className="text-sm font-medium text-slate-100 truncate">
-                            {userEmail}
+                            {userLabel}
                         </p>
                         <span className={`inline-block mt-1 px-2 py-0.5 rounded-sm text-xs font-semibold border ${getRoleBadgeColor()}`}>
                             {roleLabel}

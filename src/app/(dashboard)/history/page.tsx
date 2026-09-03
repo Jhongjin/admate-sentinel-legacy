@@ -1,15 +1,13 @@
 import { createClient } from '@/utils/supabase/server';
+import { resolveSentinelActor } from '@/lib/auth/sentinel-profile-boundary';
 import { History, Search, Filter } from 'lucide-react';
 import HistoryClientUI from './HistoryClientUI';
 
 export default async function HistoryPage() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-
-    // Fetch user details for team
-    const { data: myUser } = await supabase.from('users').select('*, teams(name)').eq('id', user.id).single();
-    if (!myUser) return null;
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) return null;
+    const myUser = actorResolution.actor;
 
     const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(myUser.role);
 

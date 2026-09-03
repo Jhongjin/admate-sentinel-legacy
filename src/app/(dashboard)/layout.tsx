@@ -4,6 +4,7 @@ import Sidebar from '@/components/Sidebar';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
 import { headers } from 'next/headers';
+import { resolveSentinelActor } from '@/lib/auth/sentinel-profile-boundary';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -18,15 +19,16 @@ export default async function DashboardLayout({
     children: React.ReactNode;
 }) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const actorResolution = await resolveSentinelActor({
+        supabase,
+        allowGuestWithoutOrganization: true,
+    });
 
-    if (!user) {
+    if (!actorResolution.ok && actorResolution.reason === 'session_missing') {
         redirect('/login');
     }
-
-    // Role Fetching
-    const { data } = await supabase.from('users').select('role').eq('id', user.id).single();
-    const role = data?.role || 'GUEST';
+    if (!actorResolution.ok && !actorResolution.guest) redirect('/login');
+    const role = actorResolution.ok ? actorResolution.actor.role : actorResolution.guest!.role;
 
     // Route Guard
     const headerList = await headers();
