@@ -2,15 +2,13 @@
 
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { resolveSentinelActor } from '@/lib/auth/sentinel-profile-boundary';
 
 export async function passAuditErrorAction(logId: string, rowId: number) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Not authenticated');
-
-    // Get user info for logging who passed it
-    const { data: myUser } = await supabase.from('users').select('full_name, email').eq('id', user.id).single();
-    const passedBy = myUser?.full_name || myUser?.email || 'Unknown';
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) throw new Error('sentinel_profile_authority_required');
+    const passedBy = actorResolution.actor.full_name || actorResolution.actor.email;
 
     // Fetch the specific log
     const { data: log } = await supabase.from('audit_logs').select('details').eq('id', logId).single();
@@ -45,12 +43,9 @@ export async function passAuditErrorAction(logId: string, rowId: number) {
 
 export async function passAllAuditErrorsAction(logId: string) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Not authenticated');
-
-    // Get user info for logging who passed it
-    const { data: myUser } = await supabase.from('users').select('full_name, email').eq('id', user.id).single();
-    const passedBy = myUser?.full_name || myUser?.email || 'Unknown';
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) throw new Error('sentinel_profile_authority_required');
+    const passedBy = actorResolution.actor.full_name || actorResolution.actor.email;
 
     // Fetch the specific log
     const { data: log } = await supabase.from('audit_logs').select('details').eq('id', logId).single();

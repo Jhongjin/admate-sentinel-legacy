@@ -1,20 +1,33 @@
 import { createClient } from '@/utils/supabase/server';
 import { ShieldCheck, UserCheck } from 'lucide-react';
 import { revalidatePath } from 'next/cache';
+import {
+    hasSentinelRole,
+    listGuestProfilesForAdministrator,
+    resolveSentinelActor,
+    type SentinelRole,
+    updateSentinelProfileForAdministrator,
+} from '@/lib/auth/sentinel-profile-boundary';
 
 async function approveUser(formData: FormData) {
     'use server';
     const supabase = await createClient();
-    const userId = formData.get('userId') as string;
-    const role = formData.get('role') as string;
-    const teamId = formData.get('teamId') as string;
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) {
+        console.error('sentinel_guest_approval_authority_missing');
+        return;
+    }
 
-    const payload: any = { role };
-    if (teamId) payload.team_id = teamId;
-
-    const { error } = await supabase.from('users').update(payload).eq('id', userId);
-    if (error) {
-        console.error('Error updating user:', error);
+    try {
+        await updateSentinelProfileForAdministrator({
+            actor: actorResolution.actor,
+            targetUserId: String(formData.get('userId') || ''),
+            role: String(formData.get('role') || '') as SentinelRole,
+            teamId: String(formData.get('teamId') || '') || null,
+        });
+    } catch {
+        console.error('sentinel_guest_approval_failed');
+        return;
     }
     revalidatePath('/settings/users');
 }
@@ -22,17 +35,14 @@ async function approveUser(formData: FormData) {
 export default async function UserApprovalPage() {
     const supabase = await createClient();
 
-    // Verify Admin rights again just in case
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-
-    const { data: adminData } = await supabase.from('users').select('role').eq('id', user.id).single();
-    if (adminData?.role !== 'SUPER_ADMIN' && adminData?.role !== 'ADMIN') {
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) return null;
+    if (!hasSentinelRole(actorResolution.actor, ['SUPER_ADMIN', 'ADMIN'])) {
         return <div className="p-8 text-rose-500 font-bold">권한이 부족합니다.</div>;
     }
 
     // Fetch Guests
-    const { data: guests } = await supabase.from('users').select('*').eq('role', 'GUEST').order('created_at', { ascending: false });
+    const guests = await listGuestProfilesForAdministrator(actorResolution.actor);
 
     // Fetch Teams
     const { data: teams } = await supabase.from('teams').select('*').order('name', { ascending: true });

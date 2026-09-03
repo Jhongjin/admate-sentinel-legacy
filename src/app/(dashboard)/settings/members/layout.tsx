@@ -1,16 +1,17 @@
 import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
+import { hasSentinelRole, resolveSentinelActor } from '@/lib/auth/sentinel-profile-boundary';
 
 export default async function MembersLayout({ children }: { children: React.ReactNode }) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) redirect('/login');
-
-    const { data: adminData } = await supabase.from('users').select('role').eq('id', user.id).single();
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok && actorResolution.reason === 'session_missing') redirect('/login');
 
     // Only allow SUPER_ADMIN, ADMIN, TEAM_MANAGER
-    const allowedRoles = ['SUPER_ADMIN', 'ADMIN', 'TEAM_MANAGER'];
-    if (!adminData || !allowedRoles.includes(adminData.role)) {
+    if (
+        !actorResolution.ok
+        || !hasSentinelRole(actorResolution.actor, ['SUPER_ADMIN', 'ADMIN', 'TEAM_MANAGER'])
+    ) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
                 <div className="text-center">

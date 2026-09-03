@@ -2,17 +2,26 @@ import { createClient } from '@/utils/supabase/server';
 import { Users, Trash2, MailPlus, UserCog } from 'lucide-react';
 import { inviteMemberAction, updateMemberAction, deleteMemberAction } from './actions';
 import DeleteButton from './DeleteButton';
+import {
+    listSentinelProfilesForActor,
+    resolveSentinelActor,
+} from '@/lib/auth/sentinel-profile-boundary';
+
+function readTeamName(relation: unknown) {
+    const candidate = Array.isArray(relation) ? relation[0] : relation;
+    if (!candidate || typeof candidate !== 'object' || !('name' in candidate)) return null;
+    return typeof candidate.name === 'string' ? candidate.name : null;
+}
 
 export default async function MembersPage() {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) return null;
+    const myUser = actorResolution.actor;
+    const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(myUser.role);
 
-    const { data: myUser } = await supabase.from('users').select('*').eq('id', user.id).single();
-    const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(myUser?.role);
-
-    // RLS filters: Admins get all users, Team Managers get only their team
-    const { data: members } = await supabase.from('users').select('*, teams(name)').order('created_at', { ascending: false });
+    // The server boundary preserves the existing admin/all and manager/team-only view.
+    const members = await listSentinelProfilesForActor(myUser);
 
     // Admins can see all teams to assign users
     const { data: teams } = await supabase.from('teams').select('*').order('name', { ascending: true });
@@ -168,7 +177,7 @@ export default async function MembersPage() {
                                             </form>
                                         ) : (
                                             <span className="text-zinc-600 dark:text-zinc-400">
-                                                {member.teams?.name || <span className="text-rose-500 font-medium text-xs">미할당</span>}
+                                                {readTeamName(member.teams) || <span className="text-rose-500 font-medium text-xs">미할당</span>}
                                             </span>
                                         )}
                                     </td>

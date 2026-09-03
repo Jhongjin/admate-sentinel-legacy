@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { resolveSentinelActor } from '@/lib/auth/sentinel-profile-boundary';
 import { ParsedRow, AuditResult } from './AuditClientUI';
 
 type MetaApiJson = {
@@ -47,18 +48,13 @@ async function fetchMetaJson(path: string, token: string, accountId: string, ste
 
 export async function crosscheckApiAction(rows: ParsedRow[]): Promise<AuditResult[]> {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Not authenticated');
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) throw new Error('sentinel_profile_authority_required');
 
-    // Fetch User Team and Role
-    const { data: myUser } = await supabase
-        .from('users')
-        .select('role, team_id, teams(name)')
-        .eq('id', user.id)
-        .single();
-
-    const isAdmin = myUser?.role === 'SUPER_ADMIN' || myUser?.role === 'ADMIN';
-    const myTeamName = (myUser?.teams as any)?.name;
+    const myUser = actorResolution.actor;
+    const isAdmin = myUser.role === 'SUPER_ADMIN' || myUser.role === 'ADMIN';
+    const teamRelation = Array.isArray(myUser.teams) ? myUser.teams[0] : myUser.teams;
+    const myTeamName = teamRelation?.name;
 
     // Fetch Meta Token using Service Role to bypass RLS for background validation validation
     const adminClient = createSupabaseClient(

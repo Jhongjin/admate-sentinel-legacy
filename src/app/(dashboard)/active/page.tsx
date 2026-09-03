@@ -1,16 +1,16 @@
 import { createClient } from '@/utils/supabase/server';
+import { resolveSentinelActor } from '@/lib/auth/sentinel-profile-boundary';
 import ActiveDashboardClientUI from './ActiveDashboardClientUI';
 
 export default async function ActiveDashboardPage() {
     const supabase = await createClient();
 
-    // 1. Get user team
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return <div>Auth required</div>;
+    // 1. Resolve the signed-in actor and exact organization membership on the server.
+    const actorResolution = await resolveSentinelActor({ supabase });
+    if (!actorResolution.ok) return <div>Auth required</div>;
 
-    const { data: myUser } = await supabase.from('users').select('team_id, role').eq('id', user.id).single();
-    const teamId = myUser?.team_id;
-    const role = myUser?.role;
+    const teamId = actorResolution.actor.team_id;
+    const role = actorResolution.actor.role;
     const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
 
     if (!teamId && !isAdmin) {
